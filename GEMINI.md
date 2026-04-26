@@ -33,6 +33,6 @@ Sai lầm phổ biến là dùng plugin kiểu:
 - [x] **Category Management:** Split into Keywords (Rules) and Categories list for better control.
 
 ### Next Steps
-- Implement real bank tracking logic in `WalletScreen` (currently UI only).
+- [x] Implement real bank tracking logic in `WalletScreen` (Fully functional with Isar and custom parsers).
 - Add more bank parsers for regional banks.
 - Improve data visualization with more chart types.

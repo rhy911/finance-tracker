@@ -15,12 +15,21 @@ class ManualTransactionScreen extends StatefulWidget {
 class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   final _repository = TransactionRepository();
   final _categoryService = CategoryService();
+  final _currencyFormat = NumberFormat.decimalPattern('vi_VN');
   
   String _amountStr = '0';
+  String _balanceStr = '0';
+  String _activeField = 'amount'; // 'amount' or 'balance'
+  bool _isBankTransaction = false;
   String _type = 'expense';
-  final DateTime _selectedDate = DateTime.now();
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
   String _selectedCategory = 'Other';
   final TextEditingController _noteController = TextEditingController();
+  final TextEditingController _bankNameController = TextEditingController(text: 'Manual Bank');
+  final FocusNode _noteFocus = FocusNode();
+  final FocusNode _bankFocus = FocusNode();
+  bool _keyboardVisible = false;
   List<cat.Category> _categories = [];
 
   final Map<String, IconData> _iconMap = {
@@ -45,6 +54,26 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   void initState() {
     super.initState();
     _loadCategories();
+    _noteFocus.addListener(_onFocusChange);
+    _bankFocus.addListener(_onFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _noteFocus.removeListener(_onFocusChange);
+    _bankFocus.removeListener(_onFocusChange);
+    _noteFocus.dispose();
+    _bankFocus.dispose();
+    _noteController.dispose();
+    _bankNameController.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    final hasFocus = _noteFocus.hasFocus || _bankFocus.hasFocus;
+    if (hasFocus != _keyboardVisible) {
+      setState(() => _keyboardVisible = hasFocus);
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -61,41 +90,78 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
     }
   }
 
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) setState(() => _selectedDate = picked);
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null) setState(() => _selectedTime = picked);
+  }
+
   void _onKeyPress(String key) {
     setState(() {
+      String current = _activeField == 'amount' ? _amountStr : _balanceStr;
+      
       if (key == 'back') {
-        if (_amountStr.length > 1) {
-          _amountStr = _amountStr.substring(0, _amountStr.length - 1);
+        if (current.length > 1) {
+          current = current.substring(0, current.length - 1);
         } else {
-          _amountStr = '0';
+          current = '0';
         }
       } else if (key == '.') {
-        if (!_amountStr.contains('.')) _amountStr += '.';
+        if (!current.contains('.')) current += '.';
       } else {
-        if (_amountStr == '0') {
-          _amountStr = key;
-        } else if (_amountStr.length < 12) {
-          _amountStr += key;
+        if (current == '0') {
+          current = key;
+        } else if (current.length < 12) {
+          current += key;
         }
+      }
+
+      if (_activeField == 'amount') {
+        _amountStr = current;
+      } else {
+        _balanceStr = current;
       }
     });
   }
 
   Future<void> _save() async {
     final amount = double.tryParse(_amountStr) ?? 0.0;
+    final balance = _isBankTransaction ? (double.tryParse(_balanceStr) ?? 0.0) : null;
+
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter an amount')));
       return;
     }
 
+    final fullDateTime = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      _selectedTime.hour,
+      _selectedTime.minute,
+    );
+
     final tx = db.Transaction()
       ..amount = amount
       ..type = _type
-      ..timestamp = _selectedDate
+      ..timestamp = fullDateTime
       ..description = _noteController.text.isEmpty ? _selectedCategory : _noteController.text
-      ..bankName = 'Manual'
+      ..bankName = _isBankTransaction ? _bankNameController.text.trim() : 'Manual'
       ..sourcePackageName = 'manual'
       ..category = _selectedCategory
+      ..balanceAfter = balance
       ..rawContent = 'Manual entry'
       ..contentHash = 'manual_${DateTime.now().millisecondsSinceEpoch}'
       ..parserVersion = 0
@@ -108,11 +174,9 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.decimalPattern('vi_VN');
-    
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
-      resizeToAvoidBottomInset: false, 
+      resizeToAvoidBottomInset: true, 
       appBar: AppBar(
         backgroundColor: const Color(0xFF3AA39F),
         elevation: 0,
@@ -120,43 +184,54 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
         title: const Text('Add Transaction', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          _buildDisplaySection(currencyFormat),
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
-              ),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 20),
-                          _buildTypeToggle(),
-                          const SizedBox(height: 20),
-                          _buildCategoryList(),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 25),
-                            child: Divider(),
-                          ),
-                          _buildNoteField(),
-                          const SizedBox(height: 20),
-                        ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildDisplaySection(_currencyFormat),
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+                ),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 20),
+                            _buildTypeToggle(),
+                            const SizedBox(height: 16),
+                            _buildDateTimeSection(),
+                            const SizedBox(height: 16),
+                            _buildBankToggle(),
+                            if (_isBankTransaction) ...[
+                              _buildBankFields(),
+                            ],
+                            const SizedBox(height: 16),
+                            _buildCategoryList(),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 25),
+                              child: Divider(),
+                            ),
+                            _buildNoteField(),
+                            const SizedBox(height: 20),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  _buildNumberPad(),
-                  _buildSaveButton(),
-                ],
+                    if (!_keyboardVisible) ...[
+                      _buildNumberPad(),
+                      _buildSaveButton(),
+                    ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -164,19 +239,60 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   Widget _buildDisplaySection(NumberFormat format) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(25, 0, 25, 40),
+      padding: const EdgeInsets.fromLTRB(25, 0, 25, 30),
       color: const Color(0xFF3AA39F),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('AMOUNT', style: TextStyle(color: Colors.white60, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-          const SizedBox(height: 8),
-          FittedBox(
-            child: Text(
-              '${format.format(double.tryParse(_amountStr) ?? 0)} ₫',
-              style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                FocusScope.of(context).unfocus();
+                setState(() {
+                  _activeField = 'amount';
+                  _keyboardVisible = false;
+                });
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('AMOUNT', style: TextStyle(color: _activeField == 'amount' ? Colors.white : Colors.white60, fontSize: 10, fontWeight: FontWeight.bold)),
+                  FittedBox(
+                    child: Text(
+                      format.format(double.tryParse(_amountStr) ?? 0),
+                      style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: _activeField == 'amount' ? FontWeight.bold : FontWeight.normal),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          if (_isBankTransaction) ...[
+            const SizedBox(width: 20),
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  FocusScope.of(context).unfocus();
+                  setState(() {
+                    _activeField = 'balance';
+                    _keyboardVisible = false;
+                  });
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('BALANCE LEFT', style: TextStyle(color: _activeField == 'balance' ? Colors.white : Colors.white60, fontSize: 10, fontWeight: FontWeight.bold)),
+                    FittedBox(
+                      child: Text(
+                        format.format(double.tryParse(_balanceStr) ?? 0),
+                        style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: _activeField == 'balance' ? FontWeight.bold : FontWeight.normal),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -195,6 +311,87 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
             child: _toggleItem('income', 'Income', Icons.arrow_downward, Colors.green),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDateTimeSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 25),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: _pickDate,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 16, color: Color(0xFF3AA39F)),
+                    const SizedBox(width: 8),
+                    Text(DateFormat('dd/MM/yyyy').format(_selectedDate), style: const TextStyle(fontSize: 14)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: _pickTime,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.access_time, size: 16, color: Color(0xFF3AA39F)),
+                    const SizedBox(width: 8),
+                    Text(_selectedTime.format(context), style: const TextStyle(fontSize: 14)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBankToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 25),
+      child: SwitchListTile(
+        title: const Text('Bank Transaction', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        subtitle: const Text('Includes balance update', style: TextStyle(fontSize: 12)),
+        value: _isBankTransaction,
+        activeThumbColor: const Color(0xFF3AA39F),
+        onChanged: (v) => setState(() {
+          _isBankTransaction = v;
+          if (!v) _activeField = 'amount';
+        }),
+      ),
+    );
+  }
+
+  Widget _buildBankFields() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 25),
+      child: TextField(
+        controller: _bankNameController,
+        focusNode: _bankFocus,
+        decoration: const InputDecoration(
+          labelText: 'Bank Name',
+          hintText: 'e.g. VCB, MoMo...',
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        ),
       ),
     );
   }
@@ -281,6 +478,7 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 10),
       child: TextField(
         controller: _noteController,
+        focusNode: _noteFocus,
         decoration: const InputDecoration(
           hintText: 'Add a note...',
           border: InputBorder.none,

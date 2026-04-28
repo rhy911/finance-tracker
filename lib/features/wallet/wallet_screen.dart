@@ -4,6 +4,7 @@ import '../../core/database/custom_bank_rule.dart';
 import '../../core/database/bank_status.dart';
 import '../../core/parsers/bank_parser_registry.dart';
 import 'package:isar/isar.dart';
+import '../../main.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
@@ -193,6 +194,72 @@ class _WalletScreenState extends State<WalletScreen> {
           _guideStep('2', 'Identify keywords for Income/Expense (e.g. "+", "nhan tien").'),
           _guideStep('3', 'Use Regex for Amount. Example: ([0-9,.]+) VND.'),
           _guideStep('4', 'Save and test with a new notification.'),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text(
+            'Missed a notification?',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF3AA39F)),
+          ),
+          const Text(
+            'If the notification is still in your status bar, you can sync it manually.',
+            style: TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: () => _showSyncDialog(context),
+              icon: const Icon(Icons.sync),
+              label: const Text('Sync Notifications'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3AA39F),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSyncDialog(BuildContext context) {
+    final controller = TextEditingController(text: '60');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sync Notifications'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter time window (minutes) to look back for active notifications in your status bar.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Minutes',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final mins = int.tryParse(controller.text) ?? 60;
+              final success = await NativeService.reReadNotifications(mins);
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(success ? 'Syncing notifications...' : 'Service not active. Grant permission first.')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3AA39F), foregroundColor: Colors.white),
+            child: const Text('Sync Now'),
+          ),
         ],
       ),
     );

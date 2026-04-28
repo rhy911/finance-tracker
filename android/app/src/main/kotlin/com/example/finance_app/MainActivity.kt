@@ -89,6 +89,11 @@ class MainActivity : FlutterActivity() {
                     prefs.edit().remove("history").apply()
                     result.success(null)
                 }
+                "reReadNotifications" -> {
+                    val minutes = call.argument<Int>("minutes") ?: 60
+                    FinanceNotificationService.instance?.reReadNotifications(minutes)
+                    result.success(FinanceNotificationService.instance != null)
+                }
                 else -> result.notImplemented()
             }
         }

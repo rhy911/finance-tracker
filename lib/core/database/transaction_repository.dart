@@ -46,31 +46,51 @@ class TransactionRepository {
       'description': t.description,
       'category': t.category,
       'bankName': t.bankName,
+      'sourcePackageName': t.sourcePackageName,
+      'rawContent': t.rawContent,
       'contentHash': t.contentHash,
+      'parserVersion': t.parserVersion,
+      'isParsedSuccessfully': t.isParsedSuccessfully,
+      'balanceAfter': t.balanceAfter,
+      'createdAt': t.createdAt.toIso8601String(),
     }).toList();
     return jsonEncode(data);
   }
 
-  Future<void> importData(String jsonString) async {
-    final List<dynamic> data = jsonDecode(jsonString);
+  Future<void> _importCore(List<dynamic> data) async {
     await isar.writeTxn(() async {
       for (var item in data) {
+        final hash = item['contentHash'] as String;
+        final exists = await existsByHash(hash);
+        if (exists) continue;
+
         final tx = Transaction()
-          ..amount = item['amount']
+          ..amount = (item['amount'] as num).toDouble()
           ..type = item['type']
           ..timestamp = DateTime.parse(item['timestamp'])
           ..description = item['description']
           ..category = item['category']
           ..bankName = item['bankName']
-          ..contentHash = item['contentHash'];
-        
-        // Check if exists to avoid dups
-        final exists = await existsByHash(tx.contentHash);
-        if (!exists) {
-          await isar.transactions.put(tx);
-        }
+          ..sourcePackageName = item['sourcePackageName'] ?? 'imported'
+          ..rawContent = item['rawContent'] ?? 'Imported transaction'
+          ..contentHash = hash
+          ..parserVersion = item['parserVersion'] ?? 0
+          ..isParsedSuccessfully = item['isParsedSuccessfully'] ?? true
+          ..balanceAfter = item['balanceAfter'] != null ? (item['balanceAfter'] as num).toDouble() : null
+          ..createdAt = item['createdAt'] != null ? DateTime.parse(item['createdAt']) : DateTime.now();
+
+        await isar.transactions.put(tx);
       }
     });
+  }
+
+  Future<void> importData(String jsonString) async {
+    final dynamic decoded = jsonDecode(jsonString);
+    if (decoded is List) {
+      await _importCore(decoded);
+    } else {
+      throw const FormatException('Invalid backup format');
+    }
   }
 
   Future<void> deleteOldTransactions(DateTime before) async {

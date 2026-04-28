@@ -24,6 +24,16 @@ class NativeService {
       debugPrint("NativeService: Stop failed: $e");
     }
   }
+
+  static Future<bool> reReadNotifications(int minutes) async {
+    try {
+      final result = await _channel.invokeMethod<bool>('reReadNotifications', {'minutes': minutes});
+      return result ?? false;
+    } catch (e) {
+      debugPrint("NativeService: reReadNotifications failed: $e");
+      return false;
+    }
+  }
 }
 
 void main() async {
